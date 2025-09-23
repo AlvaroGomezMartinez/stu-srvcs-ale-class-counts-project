@@ -1,0 +1,45 @@
+### Google Apps Script / clasp
+# clasp credentials and state
+.clasprc.json
+# local clasp manifest/backups
+.claspignore
+# compiled/build output (if using bundlers/tsc)
+dist/
+build/
+
+### Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+### Environment / secrets
+.env
+.env.local
+.env.*.local
+credentials.json
+client_secret.json
+
+### IDE / Editor
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+### macOS
+.DS_Store
+.AppleDouble
+._*
+Icon\r
+ehthumbs.db
+Thumbs.db
+
+### Logs
+*.log
+
+### Misc
+*.bak
+*.tmp
+~*
+*.swp
