@@ -32,6 +32,279 @@ const CONFIGS = {
 };
 
 /**
+ * Read campus count data from a source sheet using spreadsheet ID mapping.
+ * 
+ * This function extracts spreadsheet IDs and count values from a specified
+ * source sheet (ES, MS, or HS), looks up the campus name from the mapping,
+ * and returns them as an array of objects.
+ * 
+ * @param {string} sheetName - Name of the sheet (ES, MS, or HS)
+ * @param {Map} campusMap - Map of campus names to spreadsheet IDs
+ * @returns {Array<{campus: string, count: number}>} Array of campus-count pairs
+ * @example
+ * const esData = readSourceSheetData("ES", elementarySchoolCampusMap);
+ * // Returns: [{campus: "Bernal #1", count: 17}, ...]
+ */
+function readSourceSheetData(sheetName, campusMap) {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = spreadsheet.getSheetByName(sheetName);
+
+  // Return empty array if sheet doesn't exist (log warning)
+  if (!sheet) {
+    Logger.log(`Warning: ${sheetName} sheet not found, skipping`);
+    return [];
+  }
+
+  // Get last row with data
+  const lastRow = sheet.getLastRow();
+
+  // Return empty array if no data rows exist (lastRow < 2)
+  if (lastRow < 2) {
+    Logger.log(`Warning: No data rows found in ${sheetName} sheet`);
+    return [];
+  }
+
+  // Read spreadsheet IDs from column A (rows 2 to lastRow) in single batch operation
+  const idRange = sheet.getRange(2, 1, lastRow - 1, 1);
+  const idValues = idRange.getValues();
+
+  // Read count values from column D (rows 2 to lastRow) in single batch operation
+  const countRange = sheet.getRange(2, 4, lastRow - 1, 1);
+  const countValues = countRange.getValues();
+
+  // Create reverse lookup map: spreadsheet ID -> campus name
+  const idToCampusMap = new Map();
+  for (const [campusName, spreadsheetId] of campusMap) {
+    if (spreadsheetId) {
+      idToCampusMap.set(spreadsheetId, campusName);
+    }
+  }
+
+  // Build array of objects with campus and count properties
+  const results = [];
+  for (let i = 0; i < idValues.length; i++) {
+    const spreadsheetId = idValues[i][0];
+    const countValue = countValues[i][0];
+
+    // Skip if spreadsheet ID is empty
+    if (!spreadsheetId || spreadsheetId.toString().trim() === '') {
+      continue;
+    }
+
+    // Look up campus name from mapping
+    const campusName = idToCampusMap.get(spreadsheetId.toString());
+    
+    // Skip if no mapping found for this spreadsheet ID
+    if (!campusName) {
+      Logger.log(`Warning: No campus mapping found for spreadsheet ID ${spreadsheetId} in ${sheetName}`);
+      continue;
+    }
+
+    // Convert empty or invalid count values to 0
+    let count = 0;
+    if (countValue !== null && countValue !== undefined && countValue !== '') {
+      const parsedCount = Number(countValue);
+      if (!isNaN(parsedCount)) {
+        count = parsedCount;
+      } else {
+        Logger.log(`Warning: Invalid count value in ${sheetName} row ${i + 2}, defaulting to 0`);
+      }
+    }
+
+    // Add to results array
+    results.push({
+      campus: campusName,
+      count: count
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Aggregate campus counts from ES, MS, HS sheets into ALE Counts sheet.
+ * 
+ * This function reads campus names from the ALE Counts sheet, processes
+ * count data from the specified source sheet(s) using spreadsheet ID
+ * mappings, aggregates the counts, and writes the totals back to the ALE Counts sheet.
+ * 
+ * @param {string} [level] - Optional level to aggregate ('ES', 'MS', 'HS'). If omitted, aggregates all levels.
+ * @returns {number} Number of campuses updated with non-zero counts
+ * @example
+ * const updatedCount = aggregateCampusCounts('ES'); // Only elementary
+ * const updatedCount = aggregateCampusCounts(); // All levels
+ */
+function aggregateCampusCounts(level) {
+  // Get active spreadsheet reference
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // Get ALE Counts sheet reference
+  const aleCountsSheet = spreadsheet.getSheetByName("ALE Counts");
+  
+  // Display error and return if ALE Counts sheet doesn't exist
+  if (!aleCountsSheet) {
+    const errorMessage = "Error: ALE Counts sheet not found";
+    Logger.log(errorMessage);
+    SpreadsheetApp.getUi().alert(errorMessage);
+    return 0;
+  }
+  
+  // Define row ranges for each level in ALE Counts sheet
+  const rowRanges = {
+    ES: { start: 4, end: 113 },   // E4:E113 (110 rows)
+    MS: { start: 116, end: 160 }, // E116:E160 (45 rows) + E208:E209 (2 rows)
+    HS: { start: 163, end: 206 }  // E163:E206 (44 rows) + E210:E212 (3 rows)
+  };
+  
+  // Determine which rows to process based on level
+  let rowsToProcess = [];
+  if (level === 'ES') {
+    rowsToProcess = [{ start: 4, end: 113 }];
+  } else if (level === 'MS') {
+    rowsToProcess = [
+      { start: 116, end: 160 },
+      { start: 208, end: 209 }
+    ];
+  } else if (level === 'HS') {
+    rowsToProcess = [
+      { start: 163, end: 206 },
+      { start: 210, end: 212 }
+    ];
+  } else {
+    // If no level specified, process all rows
+    rowsToProcess = [{ start: 4, end: 212 }];
+  }
+  
+  // Build campus lookup map with exact campus names as keys
+  const campusLookup = {};
+  const campusValuesByRange = [];
+  
+  // Read campus names from column D for each range
+  for (const range of rowsToProcess) {
+    const numRows = range.end - range.start + 1;
+    const campusRange = aleCountsSheet.getRange(range.start, 4, numRows, 1);
+    const campusValues = campusRange.getValues();
+    
+    campusValuesByRange.push({
+      range: range,
+      values: campusValues
+    });
+    
+    for (let i = 0; i < campusValues.length; i++) {
+      const campusName = campusValues[i][0];
+      if (campusName && campusName.toString().trim() !== '') {
+        campusLookup[campusName.toString().trim()] = {
+          row: i + range.start, // Actual row number in sheet
+          originalName: campusName.toString(),
+          totalCount: 0,
+          foundInSource: false
+        };
+      }
+    }
+  }
+  
+  // Track campuses with missing counts
+  const missingCampuses = [];
+  
+  // Get the appropriate campus map based on level
+  let campusMap;
+  if (level === 'ES') {
+    campusMap = elementarySchoolCampusMap;
+  } else if (level === 'MS') {
+    campusMap = middleSchoolCampusMap;
+  } else if (level === 'HS') {
+    campusMap = highSchoolCampusMap;
+  }
+  
+  // Process only the specified level, or all levels if no level specified
+  if (!level || level === 'ES') {
+    const esData = readSourceSheetData("ES", elementarySchoolCampusMap);
+    for (const record of esData) {
+      if (campusLookup[record.campus]) {
+        campusLookup[record.campus].totalCount += record.count;
+        campusLookup[record.campus].foundInSource = true;
+      } else {
+        Logger.log(`Warning: Campus "${record.campus}" from ES sheet not found in ALE Counts`);
+      }
+    }
+  }
+  
+  if (!level || level === 'MS') {
+    const msData = readSourceSheetData("MS", middleSchoolCampusMap);
+    for (const record of msData) {
+      if (campusLookup[record.campus]) {
+        campusLookup[record.campus].totalCount += record.count;
+        campusLookup[record.campus].foundInSource = true;
+      } else {
+        Logger.log(`Warning: Campus "${record.campus}" from MS sheet not found in ALE Counts`);
+      }
+    }
+  }
+  
+  if (!level || level === 'HS') {
+    const hsData = readSourceSheetData("HS", highSchoolCampusMap);
+    for (const record of hsData) {
+      if (campusLookup[record.campus]) {
+        campusLookup[record.campus].totalCount += record.count;
+        campusLookup[record.campus].foundInSource = true;
+      } else {
+        Logger.log(`Warning: Campus "${record.campus}" from HS sheet not found in ALE Counts`);
+      }
+    }
+  }
+  
+  // If a specific level was requested, check which campuses from the map are missing
+  if (level && campusMap) {
+    for (const [campusName] of campusMap) {
+      if (campusLookup[campusName] && !campusLookup[campusName].foundInSource) {
+        missingCampuses.push(campusName);
+      }
+    }
+  }
+  
+  // Build output arrays and write to each range
+  for (const rangeData of campusValuesByRange) {
+    const outputArray = [];
+    for (let i = 0; i < rangeData.values.length; i++) {
+      const campusName = rangeData.values[i][0];
+      if (campusName && campusName.toString().trim() !== '') {
+        const count = campusLookup[campusName.toString().trim()] ? campusLookup[campusName.toString().trim()].totalCount : 0;
+        outputArray.push([count]);
+      } else {
+        outputArray.push([0]);
+      }
+    }
+    
+    // Write counts to column E for this specific row range
+    const numRows = rangeData.range.end - rangeData.range.start + 1;
+    const outputRange = aleCountsSheet.getRange(rangeData.range.start, 5, numRows, 1);
+    outputRange.setValues(outputArray);
+  }
+  
+  // Count number of campuses with non-zero values
+  let campusesUpdated = 0;
+  for (const campusName in campusLookup) {
+    if (campusLookup[campusName].totalCount > 0) {
+      campusesUpdated++;
+    }
+  }
+  
+  // Display success message with count of updated campuses
+  let successMessage = `${campusesUpdated} ${level}'s Total Enrolled values in the ALE Counts sheet were updated.`;
+  
+  // Add missing campuses information if any
+  if (missingCampuses.length > 0) {
+    successMessage += `\n\nCampuses with missing counts (${missingCampuses.length}):\n${missingCampuses.join(', ')}\n\nA value of 0 was added for those campuses.`;
+  }
+  
+  Logger.log(successMessage);
+  SpreadsheetApp.getUi().alert(successMessage);
+  
+  // Return number of campuses updated
+  return campusesUpdated;
+}
+
+/**
  * Install the custom menu into the active spreadsheet UI.
  * This creates a top-level "Update Counts" menu with sub-menus for
  * Elementary, Middle, and High school actions.
@@ -95,21 +368,30 @@ function getHSSpreadsheetIds() { getSpreadsheetIdsFromFolder(CONFIGS.HS); }
  * listed in the sheet.
  * @returns {void}
  */
-function extractESGradeLevelValue() { extractGradeLevelValue(CONFIGS.ES); }
+function extractESGradeLevelValue() { 
+  extractGradeLevelValue(CONFIGS.ES);
+  aggregateCampusCounts('ES');
+}
 
 /**
  * Extract grade-level value for Middle School spreadsheets
  * listed in the sheet.
  * @returns {void}
  */
-function extractMSGradeLevelValue() { extractGradeLevelValue(CONFIGS.MS); }
+function extractMSGradeLevelValue() { 
+  extractGradeLevelValue(CONFIGS.MS);
+  aggregateCampusCounts('MS');
+}
 
 /**
  * Extract grade-level value for High School spreadsheets
  * listed in the sheet.
  * @returns {void}
  */
-function extractHSGradeLevelValue() { extractGradeLevelValue(CONFIGS.HS); }
+function extractHSGradeLevelValue() { 
+  extractGradeLevelValue(CONFIGS.HS);
+  aggregateCampusCounts('HS');
+}
 
 /**
  * MAIN GENERIC FUNCTIONS
@@ -259,7 +541,16 @@ function extractGradeLevelValue(levelConfig) {
         throw new Error("Could not find 'Current Grade Level' header or target value.");
       }
     } catch (e) {
-      idsSheet.getRange(currentRowInSheet, 3).setValue(e.message);
+      // Log the error for debugging
+      Logger.log(`Error processing row ${currentRowInSheet}, ID ${id}: ${e.message}`);
+      
+      // Write a user-friendly error message to the sheet
+      let errorMessage = e.message;
+      if (errorMessage.includes("permission") || errorMessage.includes("access")) {
+        errorMessage = "No permission to access this spreadsheet";
+      }
+      
+      idsSheet.getRange(currentRowInSheet, 3).setValue(errorMessage);
       idsSheet.getRange(currentRowInSheet, 4).clearContent();
     }
   });
