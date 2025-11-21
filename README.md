@@ -1,40 +1,77 @@
-# Stu-Srvcs ALE Class Counts Project
+# ALE Class Counts Automation
 
-This repository contains Google Apps Script code for the "Student Services ALE Class Counts" project.
+Google Apps Script project that automates the collection and aggregation of Alternative Learning Experience (ALE) class counts across Elementary, Middle, and High School campuses.
 
-Files
-- `appsscript.json` — Google Apps Script project manifest.
-- `Code.js` — Main server-side Apps Script code.
+## Overview
 
-Purpose
+This script streamlines the process of gathering student enrollment data from multiple Google Sheets spread across different school campuses and consolidating them into a single "ALE Counts" sheet. It eliminates manual data entry by automatically extracting teacher reported class count values from individual campus spreadsheets.
 
-This project automates or stores logic related to Alternative Learning Experience (ALE) class counts for student services. It is authored as a Google Apps Script project and can be run within the Apps Script editor or managed locally using `clasp`.
+## Features
 
-Getting started
+- **Automated Data Collection**: Scans Drive folders for campus spreadsheets and extracts enrollment counts
+- **Multi-Level Support**: Handles Elementary (ES), Middle (MS), and High School (HS) data separately or together
+- **Campus Mapping**: Uses predefined mappings to match spreadsheet IDs with campus names
+- **Batch Processing**: Efficiently processes multiple spreadsheets using batch operations
+- **Error Handling**: Logs warnings for missing data, permission issues, and invalid values
+- **Custom Menu**: Provides an intuitive UI menu in Google Sheets for easy operation
 
-1. Install clasp (if you want local development):
+## Project Structure
 
-   npm install -g @google/clasp
+```
+├── Code.js              # Main script with data extraction and aggregation logic
+├── CampusMapping.js     # Campus name to spreadsheet ID mappings for ES/MS/HS
+├── appsscript.json      # Apps Script manifest with OAuth scopes
+├── .clasp.json          # Clasp configuration for local development
+└── README.md            # This file
+```
 
-2. Authenticate clasp with your Google account:
+## How It Works
 
-   clasp login
+### Workflow
 
-3. Clone / pull this project locally (if using a remote script):
+1. **Get Spreadsheet IDs**: Scans a configured Drive folder and lists all Google Sheets with their IDs
+2. **Get Counts**: Opens each spreadsheet, finds the "Current Grade Level" header, and extracts the enrollment value
+3. **Aggregate Data**: Matches spreadsheet IDs to campus names and writes totals to the "ALE Counts" sheet
 
-   clasp clone <SCRIPT_ID>
+### Menu Structure
 
-4. Push changes back to Google Apps Script:
+The script adds an "Update Counts" menu to your Google Sheet with three sub-menus:
 
-   clasp push
+- **Elementary School**
+  - 1. Get Spreadsheet IDs
+  - 2. Get Counts
+- **Middle School**
+  - 1. Get Spreadsheet IDs
+  - 2. Get Counts
+- **High School**
+  - 1. Get Spreadsheet IDs
+  - 2. Get Counts
 
-Files of interest
+## Configuration
 
-- `Code.js` — contains the Apps Script functions. Open it in the Apps Script editor to view runtime behavior.
-- `appsscript.json` — manifest containing OAuth scopes and runtime settings.
+The script uses folder IDs defined in the `CONFIGS` object in `Code.js`:
 
-License & contact
+```javascript
+const CONFIGS = {
+  ES: { folderId: "...", sheetName: "ES" },
+  MS: { folderId: "...", sheetName: "MS" },
+  HS: { folderId: "...", sheetName: "HS" }
+};
+```
 
-If you need help or want to contribute, contact the repository owner.
+Campus mappings are maintained in `CampusMapping.js` with three Map objects:
+- `elementarySchoolCampusMap`
+- `middleSchoolCampusMap`
+- `highSchoolCampusMap`
 
-License: MIT
+## Requirements
+
+- Google Workspace account with access to:
+  - Google Sheets API
+  - Google Drive API
+- Appropriate permissions to access campus spreadsheets
+- Drive folders containing campus spreadsheets must be accessible
+
+## License
+
+MIT
